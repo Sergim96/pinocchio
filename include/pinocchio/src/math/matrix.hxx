@@ -672,7 +672,7 @@ namespace pinocchio
     auto & mat = mat_.const_cast_derived();
     MapMatrix tmp = MapMatrix(_PINOCCHIO_EIGEN_MAP_ALLOCA(Scalar, mat.rows(), mat.rows()));
 
-    tmp = 0.5 * (mat + mat.transpose());
+    tmp = Scalar(0.5) * (mat + mat.transpose());
     mat = tmp;
 
     assert(isSymmetric(mat));

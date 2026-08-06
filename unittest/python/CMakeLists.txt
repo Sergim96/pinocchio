@@ -151,6 +151,13 @@ if(urdfdom_FOUND)
     )
 endif(urdfdom_FOUND)
 
+if(BUILD_WITH_CODEGEN_SUPPORT)
+    set(${PROJECT_NAME}_PYTHON_TESTS
+        ${${PROJECT_NAME}_PYTHON_TESTS}
+        bindings_cppadcg_float32
+    )
+endif()
+
 if(TARGET build_tests)
     add_dependencies(build_tests ${PROJECT_NAME}-python)
 endif()

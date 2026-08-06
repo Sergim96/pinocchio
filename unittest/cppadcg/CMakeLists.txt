@@ -19,6 +19,8 @@ if(BUILD_WITH_AUTODIFF_SUPPORT AND NOT BUILD_STANDALONE_PYTHON_INTERFACE)
         )
 
         add_cppadcg_unit_test(basic)
+        add_cppadcg_unit_test(rnea)
+        add_cppadcg_unit_test(rnea-float32)
         if(BUILD_ADVANCED_TESTING)
             add_cppadcg_unit_test(algorithms)
             add_cppadcg_unit_test(joint-configurations)

@@ -872,6 +872,7 @@ set(${PROJECT_NAME}_BINDINGS_PYTHON_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/pinocchio/bindings/python/utils/namespace.hpp
     ${PROJECT_SOURCE_DIR}/include/pinocchio/bindings/python/utils/std-aligned-vector.hpp
     ${PROJECT_SOURCE_DIR}/include/pinocchio/bindings/python/context/cppadcg.hpp
+    ${PROJECT_SOURCE_DIR}/include/pinocchio/bindings/python/context/cppadcg_float32.hpp
     ${PROJECT_SOURCE_DIR}/include/pinocchio/bindings/python/context/cppad.hpp
     ${PROJECT_SOURCE_DIR}/include/pinocchio/bindings/python/context/casadi.hpp
     ${PROJECT_SOURCE_DIR}/include/pinocchio/bindings/python/context/default.hpp

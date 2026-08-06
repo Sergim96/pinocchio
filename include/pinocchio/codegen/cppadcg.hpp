@@ -89,6 +89,26 @@ namespace Eigen
       }
     };
 
+    template<>
+    struct cast_impl<CppAD::cg::CG<float>, double>
+    {
+      EIGEN_DEVICE_FUNC
+      static inline double run(const CppAD::cg::CG<float> & x)
+      {
+        return static_cast<double>(x.getValue());
+      }
+    };
+
+    template<>
+    struct cast_impl<CppAD::AD<CppAD::cg::CG<float>>, double>
+    {
+      EIGEN_DEVICE_FUNC
+      static inline double run(const CppAD::AD<CppAD::cg::CG<float>> & x)
+      {
+        return static_cast<double>(CppAD::Value(x).getValue());
+      }
+    };
+
   } // namespace internal
 } // namespace Eigen
 

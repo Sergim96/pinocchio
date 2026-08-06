@@ -25,7 +25,10 @@ if(cppadcg_FOUND AND BUILD_WITH_CODEGEN_SUPPORT AND BUILD_WITH_URDF_SUPPORT)
     endif()
 
     if(BUILD_PYTHON_INTERFACE)
-        set(${PROJECT_NAME}_CODEGEN_PYTHON_EXAMPLES codegen-rnea)
+        set(${PROJECT_NAME}_CODEGEN_PYTHON_EXAMPLES
+            codegen-rnea
+            codegen-rnea-float32
+        )
 
         foreach(EXAMPLE ${${PROJECT_NAME}_CODEGEN_PYTHON_EXAMPLES})
             set(EXAMPLE_NAME "${PROJECT_NAME}-example-py-${EXAMPLE}")

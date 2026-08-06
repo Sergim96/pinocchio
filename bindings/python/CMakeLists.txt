@@ -300,6 +300,49 @@ if(BUILD_PYTHON_INTERFACE)
 
         # --- INSTALL SCRIPTS
         install_python_files(MODULE cppadcg FILES __init__.py)
+
+        pinocchio_python_bindings_specific_type(cppadcg_float32)
+
+        # On osx, use default visiblitiy because of an issue with thread_local storage defined in
+        # cppad/cg/cg.hpp header (see
+        # https://github.com/stack-of-tasks/pinocchio/pull/2469#issuecomment-2461845127)
+        if(APPLE)
+            set_target_properties(
+                ${PYWRAP}_cppadcg_float32
+                PROPERTIES CXX_VISIBILITY_PRESET default
+            )
+        endif()
+
+        target_compile_definitions(
+            ${PYWRAP}_cppadcg_float32
+            PRIVATE
+                PYCPPAD_EXCLUDE_EIGEN_NUMTRAITS_SPECIALIZATION
+                CPPAD_DEBUG_AND_RELEASE
+        )
+        target_include_directories(
+            ${PYWRAP}_cppadcg_float32
+            SYSTEM
+            PUBLIC $<BUILD_INTERFACE:${cppadcg_INCLUDE_DIR}>
+        )
+        target_link_libraries(
+            ${PYWRAP}_cppadcg_float32
+            PUBLIC ${cppadcg_LIBRARY} ${cppad_LIBRARY}
+        )
+        list(APPEND STUBGEN_DEPENDENCIES "${PYWRAP}_cppadcg_float32")
+
+        if(PINOCCHIO_BUILD_BINDING_WITH_PCH)
+            target_precompile_headers(
+                ${PYWRAP}_cppadcg_float32
+                PRIVATE
+                    ${PROJECT_SOURCE_DIR}/include/pinocchio/bindings/python/pch.hpp
+                    <cmath>
+                    <boost/mpl/int.hpp>
+                    <cppad/cg/support/cppadcg_eigen.hpp>
+            )
+        endif()
+
+        # --- INSTALL SCRIPTS
+        install_python_files(MODULE cppadcg_float32 FILES __init__.py)
     endif(BUILD_WITH_CODEGEN_SUPPORT)
 
     if(BUILD_WITH_CASADI_SUPPORT)

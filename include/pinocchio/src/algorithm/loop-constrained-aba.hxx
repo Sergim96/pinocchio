@@ -293,6 +293,7 @@ namespace pinocchio
       Data & data)
     {
       typedef typename Model::JointIndex JointIndex;
+      typedef typename Data::Force Force;
       typedef typename Data::Matrix6x Matrix6x;
 
       typedef typename SizeDepType<JointModel::NV>::template ColsReturn<Matrix6x>::Type ColBlock;
@@ -348,6 +349,7 @@ namespace pinocchio
       Data & data)
     {
       typedef typename Model::JointIndex JointIndex;
+      typedef typename Data::Force Force;
 
       const auto J_cols = jmodel.jointCols(data.J);
 
@@ -408,6 +410,7 @@ namespace pinocchio
         const Scalar mu)
       {
         typedef typename Data::SE3 SE3;
+        typedef typename Data::Motion Motion;
         typedef typename Model::JointIndex JointIndex;
         typedef typename Data::Matrix6 Matrix6;
         typedef typename ConstraintModel::Matrix36 Matrix36;
@@ -598,6 +601,7 @@ namespace pinocchio
       tau.size(), model.nv, "The joint torque vector is not of right size");
 
     typedef ModelTpl<Scalar, Options, JointCollectionTpl> Model;
+    typedef typename DataTpl<Scalar, Options, JointCollectionTpl>::Force Force;
     typedef typename Model::JointIndex JointIndex;
     typedef typename ConstraintModel::Matrix36 Matrix36;
 
