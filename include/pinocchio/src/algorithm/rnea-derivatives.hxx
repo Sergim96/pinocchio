@@ -19,6 +19,242 @@ namespace pinocchio
       typename Scalar,
       int Options,
       template<typename, int> class JointCollectionTpl,
+      typename ConfigVectorType,
+      typename TangentVectorType1,
+      typename TangentVectorType2,
+      typename PlacementJacobianType>
+    struct ComputeRNEAPlacementDerivativesForwardStep
+    : public fusion::JointUnaryVisitorBase<ComputeRNEAPlacementDerivativesForwardStep<
+        Scalar,
+        Options,
+        JointCollectionTpl,
+        ConfigVectorType,
+        TangentVectorType1,
+        TangentVectorType2,
+        PlacementJacobianType>>
+    {
+      typedef ModelTpl<Scalar, Options, JointCollectionTpl> Model;
+      typedef DataTpl<Scalar, Options, JointCollectionTpl> Data;
+      typedef RNEAPlacementDerivativesWorkspaceTpl<Scalar, Options> Workspace;
+
+      typedef boost::fusion::vector<
+        const Model &,
+        Data &,
+        const ConfigVectorType &,
+        const TangentVectorType1 &,
+        const TangentVectorType2 &,
+        const PlacementJacobianType &,
+        Workspace &>
+        ArgsType;
+
+      template<typename JointModel>
+      static void algo(
+        const JointModelBase<JointModel> & jmodel,
+        JointDataBase<typename JointModel::JointDataDerived> & jdata,
+        const Model & model,
+        Data & data,
+        const Eigen::MatrixBase<ConfigVectorType> & q,
+        const Eigen::MatrixBase<TangentVectorType1> & v,
+        const Eigen::MatrixBase<TangentVectorType2> & a,
+        const Eigen::MatrixBase<PlacementJacobianType> & joint_placement_jacobians,
+        Workspace & workspace)
+      {
+        typedef typename Model::JointIndex JointIndex;
+        typedef typename Data::Motion Motion;
+        typedef typename Data::Force Force;
+
+        const JointIndex i = jmodel.id();
+        const JointIndex parent = model.parents[i];
+        const Eigen::Index number_parameters = joint_placement_jacobians.cols();
+
+        typedef RneaForwardStep<
+          Scalar, Options, JointCollectionTpl, ConfigVectorType, TangentVectorType1,
+          TangentVectorType2>
+          RneaPass;
+        RneaPass::algo(jmodel, jdata, model, data, q, v, a);
+
+        auto relative_placement_derivatives =
+          workspace.relativePlacementDerivative((Eigen::Index)i, number_parameters);
+        auto velocity_derivatives =
+          workspace.velocityDerivative((Eigen::Index)i, number_parameters);
+        auto acceleration_derivatives =
+          workspace.accelerationDerivative((Eigen::Index)i, number_parameters);
+        auto force_derivatives = workspace.forceDerivative((Eigen::Index)i, number_parameters);
+        auto parent_velocity_derivatives =
+          workspace.velocityDerivative((Eigen::Index)parent, number_parameters);
+        auto parent_acceleration_derivatives =
+          workspace.accelerationDerivative((Eigen::Index)parent, number_parameters);
+
+        const auto placement_derivatives =
+          joint_placement_jacobians.derived().middleRows(6 * (Eigen::Index)i, 6);
+        const typename Data::SE3 joint_motion_placement(jdata.M());
+        motionSet::se3ActionInverse(
+          joint_motion_placement, placement_derivatives, relative_placement_derivatives);
+
+        motionSet::se3ActionInverse(
+          data.liMi[i], parent_velocity_derivatives, velocity_derivatives);
+        const Motion parent_velocity(data.liMi[i].actInv(data.v[parent]));
+        motionSet::motionAction<ADDTO>(
+          parent_velocity, relative_placement_derivatives, velocity_derivatives);
+
+        motionSet::se3ActionInverse(
+          data.liMi[i], parent_acceleration_derivatives, acceleration_derivatives);
+        const Motion parent_acceleration(data.liMi[i].actInv(data.a_gf[parent]));
+        motionSet::motionAction<ADDTO>(
+          parent_acceleration, relative_placement_derivatives, acceleration_derivatives);
+        const Motion joint_velocity(jdata.v());
+        motionSet::motionAction<RMTO>(
+          joint_velocity, velocity_derivatives, acceleration_derivatives);
+
+        for (Eigen::Index parameter_id = 0; parameter_id < number_parameters; ++parameter_id)
+        {
+          const Motion velocity_derivative(velocity_derivatives.col(parameter_id));
+          const Motion acceleration_derivative(acceleration_derivatives.col(parameter_id));
+          const Force momentum_derivative = model.inertias[i] * velocity_derivative;
+          Force force_derivative = model.inertias[i] * acceleration_derivative;
+          force_derivative += velocity_derivative.cross(data.h[i]);
+          force_derivative += data.v[i].cross(momentum_derivative);
+          force_derivatives.col(parameter_id) = force_derivative.toVector();
+        }
+      }
+    };
+
+    template<
+      typename Scalar,
+      int Options,
+      template<typename, int> class JointCollectionTpl,
+      typename ReturnMatrixType>
+    struct ComputeRNEAPlacementDerivativesBackwardStep
+    : public fusion::JointUnaryVisitorBase<ComputeRNEAPlacementDerivativesBackwardStep<
+        Scalar,
+        Options,
+        JointCollectionTpl,
+        ReturnMatrixType>>
+    {
+      typedef ModelTpl<Scalar, Options, JointCollectionTpl> Model;
+      typedef DataTpl<Scalar, Options, JointCollectionTpl> Data;
+      typedef RNEAPlacementDerivativesWorkspaceTpl<Scalar, Options> Workspace;
+
+      typedef boost::fusion::vector<const Model &, Data &, Workspace &, ReturnMatrixType &>
+        ArgsType;
+
+      template<typename JointModel>
+      static void algo(
+        const JointModelBase<JointModel> & jmodel,
+        JointDataBase<typename JointModel::JointDataDerived> & jdata,
+        const Model & model,
+        Data & data,
+        Workspace & workspace,
+        const Eigen::MatrixBase<ReturnMatrixType> & rnea_partial_dp)
+      {
+        typedef typename Model::JointIndex JointIndex;
+
+        const JointIndex i = jmodel.id();
+        const JointIndex parent = model.parents[i];
+        const Eigen::Index number_parameters = rnea_partial_dp.cols();
+
+        auto force_derivatives = workspace.forceDerivative((Eigen::Index)i, number_parameters);
+        ReturnMatrixType & rnea_partial_dp_ =
+          PINOCCHIO_EIGEN_CONST_CAST(ReturnMatrixType, rnea_partial_dp);
+        jmodel.jointRows(rnea_partial_dp_).noalias() += jdata.S().transpose() * force_derivatives;
+
+        if (parent > 0)
+        {
+          auto relative_placement_derivatives =
+            workspace.relativePlacementDerivative((Eigen::Index)i, number_parameters);
+          auto transformed_force_derivatives =
+            workspace.velocityDerivative((Eigen::Index)i, number_parameters);
+          auto parent_force_derivatives =
+            workspace.forceDerivative((Eigen::Index)parent, number_parameters);
+
+          motionSet::act(relative_placement_derivatives, data.f[i], transformed_force_derivatives);
+          transformed_force_derivatives += force_derivatives;
+          forceSet::se3Action<ADDTO>(
+            data.liMi[i], transformed_force_derivatives, parent_force_derivatives);
+        }
+
+        typedef RneaBackwardStep<Scalar, Options, JointCollectionTpl> RneaPass;
+        RneaPass::algo(jmodel, jdata, model, data);
+      }
+    };
+
+    template<
+      typename Scalar,
+      int Options,
+      template<typename, int> class JointCollectionTpl,
+      typename ConfigVectorType,
+      typename TangentVectorType1,
+      typename TangentVectorType2,
+      typename PlacementJacobianType,
+      typename ReturnMatrixType>
+    void computeRNEAPlacementDerivatives(
+      const ModelTpl<Scalar, Options, JointCollectionTpl> & model,
+      DataTpl<Scalar, Options, JointCollectionTpl> & data,
+      const Eigen::MatrixBase<ConfigVectorType> & q,
+      const Eigen::MatrixBase<TangentVectorType1> & v,
+      const Eigen::MatrixBase<TangentVectorType2> & a,
+      const Eigen::MatrixBase<PlacementJacobianType> & joint_placement_jacobians,
+      RNEAPlacementDerivativesWorkspaceTpl<Scalar, Options> & workspace,
+      const Eigen::MatrixBase<ReturnMatrixType> & rnea_partial_dp)
+    {
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(
+        q.size(), model.nq, "The joint configuration vector is not of right size");
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(
+        v.size(), model.nv, "The joint velocity vector is not of right size");
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(
+        a.size(), model.nv, "The joint acceleration vector is not of right size");
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(
+        joint_placement_jacobians.rows(), 6 * model.njoints,
+        "The placement Jacobian must have 6 * model.njoints rows");
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(rnea_partial_dp.rows(), model.nv);
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(rnea_partial_dp.cols(), joint_placement_jacobians.cols());
+      PINOCCHIO_CHECK_INPUT_ARGUMENT(
+        workspace.isCompatible(model.njoints, joint_placement_jacobians.cols()),
+        "The RNEA placement-derivative workspace is not compatible with the model or parameter "
+        "count");
+      assert(model.check(data) && "data is not consistent with model.");
+
+      typedef ModelTpl<Scalar, Options, JointCollectionTpl> Model;
+      typedef typename Model::JointIndex JointIndex;
+      const Eigen::Index number_parameters = joint_placement_jacobians.cols();
+
+      data.tau.setZero();
+      data.v[0].setZero();
+      data.a_gf[0] = -model.gravity;
+      workspace.velocityDerivative(0, number_parameters).setZero();
+      workspace.accelerationDerivative(0, number_parameters).setZero();
+      ReturnMatrixType & rnea_partial_dp_ =
+        PINOCCHIO_EIGEN_CONST_CAST(ReturnMatrixType, rnea_partial_dp);
+      rnea_partial_dp_.setZero();
+
+      typedef ComputeRNEAPlacementDerivativesForwardStep<
+        Scalar, Options, JointCollectionTpl, ConfigVectorType, TangentVectorType1,
+        TangentVectorType2, PlacementJacobianType>
+        Pass1;
+      typename Pass1::ArgsType arg1(
+        model, data, q.derived(), v.derived(), a.derived(), joint_placement_jacobians.derived(),
+        workspace);
+      for (JointIndex i = 1; i < (JointIndex)model.njoints; ++i)
+      {
+        Pass1::run(model.joints[i], data.joints[i], arg1);
+      }
+
+      typedef ComputeRNEAPlacementDerivativesBackwardStep<
+        Scalar, Options, JointCollectionTpl, ReturnMatrixType>
+        Pass2;
+      typename Pass2::ArgsType arg2(model, data, workspace, rnea_partial_dp_);
+      for (JointIndex i = (JointIndex)model.njoints - 1; i > 0; --i)
+      {
+        Pass2::run(model.joints[i], data.joints[i], arg2);
+      }
+
+      data.tau.array() += model.armature.array() * a.array();
+    }
+
+    template<
+      typename Scalar,
+      int Options,
+      template<typename, int> class JointCollectionTpl,
       typename ConfigVectorType>
     struct ComputeGeneralizedGravityDerivativeForwardStep
     : public fusion::JointUnaryVisitorBase<ComputeGeneralizedGravityDerivativeForwardStep<
@@ -670,6 +906,30 @@ namespace pinocchio
     int Options,
     template<typename, int> class JointCollectionTpl,
     typename ConfigVectorType,
+    typename TangentVectorType1,
+    typename TangentVectorType2,
+    typename PlacementJacobianType,
+    typename ReturnMatrixType>
+  void computeRNEAPlacementDerivatives(
+    const ModelTpl<Scalar, Options, JointCollectionTpl> & model,
+    DataTpl<Scalar, Options, JointCollectionTpl> & data,
+    const Eigen::MatrixBase<ConfigVectorType> & q,
+    const Eigen::MatrixBase<TangentVectorType1> & v,
+    const Eigen::MatrixBase<TangentVectorType2> & a,
+    const Eigen::MatrixBase<PlacementJacobianType> & joint_placement_jacobians,
+    RNEAPlacementDerivativesWorkspaceTpl<Scalar, Options> & workspace,
+    const Eigen::MatrixBase<ReturnMatrixType> & rnea_partial_dp)
+  {
+    impl::computeRNEAPlacementDerivatives(
+      model, data, make_const_ref(q), make_const_ref(v), make_const_ref(a),
+      make_const_ref(joint_placement_jacobians), workspace, make_ref(rnea_partial_dp));
+  }
+
+  template<
+    typename Scalar,
+    int Options,
+    template<typename, int> class JointCollectionTpl,
+    typename ConfigVectorType,
     typename ReturnMatrixType>
   void computeGeneralizedGravityDerivatives(
     const ModelTpl<Scalar, Options, JointCollectionTpl> & model,
@@ -796,6 +1056,25 @@ namespace pinocchio
 {
   namespace impl
   {
+    extern template PINOCCHIO_EXPLICIT_INSTANTIATION_DECLARATION_DLLAPI void
+    computeRNEAPlacementDerivatives<
+      context::Scalar,
+      context::Options,
+      JointCollectionDefaultTpl,
+      Eigen::Ref<const context::VectorXs>,
+      Eigen::Ref<const context::VectorXs>,
+      Eigen::Ref<const context::VectorXs>,
+      Eigen::Ref<const context::MatrixXs>,
+      Eigen::Ref<context::MatrixXs>>(
+      const Model &,
+      Data &,
+      const Eigen::MatrixBase<Eigen::Ref<const context::VectorXs>> &,
+      const Eigen::MatrixBase<Eigen::Ref<const context::VectorXs>> &,
+      const Eigen::MatrixBase<Eigen::Ref<const context::VectorXs>> &,
+      const Eigen::MatrixBase<Eigen::Ref<const context::MatrixXs>> &,
+      RNEAPlacementDerivativesWorkspaceTpl<context::Scalar, context::Options> &,
+      const Eigen::MatrixBase<Eigen::Ref<context::MatrixXs>> &);
+
     extern template PINOCCHIO_EXPLICIT_INSTANTIATION_DECLARATION_DLLAPI void
     computeGeneralizedGravityDerivatives<
       context::Scalar,

@@ -14,6 +14,37 @@ namespace pinocchio
 
     namespace bp = boost::python;
     typedef std::vector<context::Force> ForceAlignedVector;
+    typedef RNEAPlacementDerivativesWorkspaceTpl<context::Scalar, context::Options>
+      RNEAPlacementDerivativesWorkspace;
+
+    context::Data::MatrixXs computeRNEAPlacementDerivatives(
+      const context::Model & model,
+      context::Data & data,
+      const context::VectorXs & q,
+      const context::VectorXs & v,
+      const context::VectorXs & a,
+      const context::MatrixXs & joint_placement_jacobians,
+      RNEAPlacementDerivativesWorkspace & workspace)
+    {
+      context::Data::MatrixXs res(model.nv, joint_placement_jacobians.cols());
+      pinocchio::computeRNEAPlacementDerivatives(
+        model, data, q, v, a, joint_placement_jacobians, workspace, res);
+      return res;
+    }
+
+    context::Data::MatrixXs computeRNEAPlacementDerivatives(
+      const context::Model & model,
+      context::Data & data,
+      const context::VectorXs & q,
+      const context::VectorXs & v,
+      const context::VectorXs & a,
+      const context::MatrixXs & joint_placement_jacobians)
+    {
+      RNEAPlacementDerivativesWorkspace workspace(
+        (Eigen::Index)model.njoints, joint_placement_jacobians.cols());
+      return computeRNEAPlacementDerivatives(
+        model, data, q, v, a, joint_placement_jacobians, workspace);
+    }
 
     context::Data::MatrixXs computeGeneralizedGravityDerivatives(
       const context::Model & model, context::Data & data, const context::VectorXs & q)
@@ -63,6 +94,37 @@ namespace pinocchio
 
     void exposeRNEADerivatives()
     {
+      bp::class_<RNEAPlacementDerivativesWorkspace>(
+        "RNEAPlacementDerivativesWorkspace",
+        "Reusable native workspace for RNEA joint-placement derivatives.", bp::init<>())
+        .def(bp::init<Eigen::Index, Eigen::Index>((bp::args("njoints", "parameter_capacity"))))
+        .def(
+          "resize", &RNEAPlacementDerivativesWorkspace::resize,
+          bp::args("self", "njoints", "parameter_capacity"))
+        .def_readonly("njoints", &RNEAPlacementDerivativesWorkspace::njoints)
+        .def_readonly("parameter_capacity", &RNEAPlacementDerivativesWorkspace::parameter_capacity);
+
+      bp::def(
+        "computeRNEAPlacementDerivatives",
+        static_cast<context::Data::MatrixXs (*)(
+          const context::Model &, context::Data &, const context::VectorXs &,
+          const context::VectorXs &, const context::VectorXs &, const context::MatrixXs &)>(
+          &computeRNEAPlacementDerivatives),
+        bp::args("model", "data", "q", "v", "a", "joint_placement_jacobians"),
+        "Computes RNEA derivatives with respect to right-trivialized joint-placement "
+        "perturbations.\n\n"
+        "The placement Jacobian is a (6 * model.njoints) by np stacked matrix.\n"
+        "Returns a model.nv by np generalized torque derivative matrix.");
+
+      bp::def(
+        "computeRNEAPlacementDerivatives",
+        static_cast<context::Data::MatrixXs (*)(
+          const context::Model &, context::Data &, const context::VectorXs &,
+          const context::VectorXs &, const context::VectorXs &, const context::MatrixXs &,
+          RNEAPlacementDerivativesWorkspace &)>(&computeRNEAPlacementDerivatives),
+        bp::args("model", "data", "q", "v", "a", "joint_placement_jacobians", "workspace"),
+        "Computes RNEA joint-placement derivatives using a reusable native workspace.");
+
       bp::def(
         "computeGeneralizedGravityDerivatives", computeGeneralizedGravityDerivatives,
         bp::args("model", "data", "q"),

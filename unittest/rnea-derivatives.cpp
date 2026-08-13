@@ -11,6 +11,7 @@
 #include "pinocchio/algorithm/rnea.hpp"
 #include "pinocchio/algorithm/rnea-derivatives.hpp"
 #include "pinocchio/algorithm/crba.hpp"
+#include "pinocchio/spatial/explog.hpp"
 
 #include <boost/test/unit_test.hpp>
 #include <boost/utility/binary.hpp>
@@ -523,6 +524,88 @@ BOOST_AUTO_TEST_CASE(test_get_coriolis)
   }
 
   BOOST_CHECK(data.C.isApprox(data_ref.C));
+}
+
+namespace
+{
+  Eigen::MatrixXd finiteDifferenceRNEAPlacementDerivatives(
+    const pinocchio::Model & model,
+    const Eigen::VectorXd & q,
+    const Eigen::VectorXd & v,
+    const Eigen::VectorXd & a,
+    const Eigen::MatrixXd & joint_placement_jacobians)
+  {
+    using namespace pinocchio;
+
+    const double step = 1e-7;
+    Eigen::MatrixXd result(model.nv, joint_placement_jacobians.cols());
+    for (Eigen::Index parameter_id = 0; parameter_id < joint_placement_jacobians.cols();
+         ++parameter_id)
+    {
+      Model model_plus(model), model_minus(model);
+      for (JointIndex joint_id = 1; joint_id < (JointIndex)model.njoints; ++joint_id)
+      {
+        const Motion tangent(
+          joint_placement_jacobians.col(parameter_id).segment<6>(6 * (Eigen::Index)joint_id));
+        model_plus.jointPlacements[joint_id] =
+          model.jointPlacements[joint_id] * exp6(step * tangent);
+        model_minus.jointPlacements[joint_id] =
+          model.jointPlacements[joint_id] * exp6(-step * tangent);
+      }
+
+      Data data_plus(model_plus), data_minus(model_minus);
+      result.col(parameter_id) =
+        (rnea(model_plus, data_plus, q, v, a) - rnea(model_minus, data_minus, q, v, a))
+        / (2. * step);
+    }
+    return result;
+  }
+
+  void checkRNEAPlacementDerivatives(const bool using_mimic)
+  {
+    using namespace pinocchio;
+
+    Model model;
+    buildModels::manipulator(model, using_mimic);
+    const Eigen::VectorXd q =
+      integrate(model, neutral(model), 0.3 * Eigen::VectorXd::Random(model.nv));
+    const Eigen::VectorXd v = Eigen::VectorXd::Random(model.nv);
+    const Eigen::VectorXd a = Eigen::VectorXd::Random(model.nv);
+
+    const Eigen::Index number_parameters = 4;
+    Eigen::MatrixXd joint_placement_jacobians =
+      0.2 * Eigen::MatrixXd::Random(6 * (Eigen::Index)model.njoints, number_parameters);
+    joint_placement_jacobians.topRows(6).setZero();
+
+    Data data(model), data_ref(model);
+    Eigen::MatrixXd result(model.nv, number_parameters);
+    RNEAPlacementDerivativesWorkspaceTpl<double> workspace(
+      (Eigen::Index)model.njoints, number_parameters + 2);
+    const double * workspace_storage = workspace.storage.data();
+
+    computeRNEAPlacementDerivatives(
+      model, data, q, v, a, joint_placement_jacobians, workspace, result);
+    const Eigen::MatrixXd expected =
+      finiteDifferenceRNEAPlacementDerivatives(model, q, v, a, joint_placement_jacobians);
+    BOOST_CHECK_SMALL((result - expected).lpNorm<Eigen::Infinity>(), 2e-5);
+    BOOST_CHECK(data.tau.isApprox(rnea(model, data_ref, q, v, a)));
+
+    Eigen::MatrixXd repeated_result(model.nv, number_parameters);
+    computeRNEAPlacementDerivatives(
+      model, data, q, v, a, joint_placement_jacobians, workspace, repeated_result);
+    BOOST_CHECK(result.isApprox(repeated_result));
+    BOOST_CHECK_EQUAL(workspace_storage, workspace.storage.data());
+  }
+} // namespace
+
+BOOST_AUTO_TEST_CASE(test_rnea_placement_derivatives)
+{
+  checkRNEAPlacementDerivatives(false);
+}
+
+BOOST_AUTO_TEST_CASE(test_rnea_placement_derivatives_mimic)
+{
+  checkRNEAPlacementDerivatives(true);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

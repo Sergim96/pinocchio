@@ -38,6 +38,7 @@ set(${PROJECT_NAME}_PYTHON_TESTS
     bindings_frame_derivatives
     bindings_forward_dynamics_derivatives
     bindings_inverse_dynamics_derivatives
+    rnea_kinematic_derivatives
     bindings_centroidal_dynamics_derivatives
     bindings_com_velocity_derivatives
     # Parsers

@@ -10,6 +10,25 @@ namespace pinocchio
   namespace impl
   {
     template PINOCCHIO_EXPLICIT_INSTANTIATION_DEFINITION_DLLAPI void
+    computeRNEAPlacementDerivatives<
+      context::Scalar,
+      context::Options,
+      JointCollectionDefaultTpl,
+      Eigen::Ref<const context::VectorXs>,
+      Eigen::Ref<const context::VectorXs>,
+      Eigen::Ref<const context::VectorXs>,
+      Eigen::Ref<const context::MatrixXs>,
+      Eigen::Ref<context::MatrixXs>>(
+      const Model &,
+      Data &,
+      const Eigen::MatrixBase<Eigen::Ref<const context::VectorXs>> &,
+      const Eigen::MatrixBase<Eigen::Ref<const context::VectorXs>> &,
+      const Eigen::MatrixBase<Eigen::Ref<const context::VectorXs>> &,
+      const Eigen::MatrixBase<Eigen::Ref<const context::MatrixXs>> &,
+      RNEAPlacementDerivativesWorkspaceTpl<context::Scalar, context::Options> &,
+      const Eigen::MatrixBase<Eigen::Ref<context::MatrixXs>> &);
+
+    template PINOCCHIO_EXPLICIT_INSTANTIATION_DEFINITION_DLLAPI void
     computeGeneralizedGravityDerivatives<
       context::Scalar,
       context::Options,
