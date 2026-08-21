@@ -253,6 +253,7 @@ add_pinocchio_unit_test(promote-static-eval HEADER_ONLY)
 # Derivatives algo
 add_pinocchio_unit_test(kinematics-derivatives)
 add_pinocchio_unit_test(frames-derivatives)
+add_pinocchio_unit_test(contact-kinematics-derivatives)
 add_pinocchio_unit_test(rnea-derivatives)
 add_pinocchio_unit_test(aba-derivatives)
 add_pinocchio_unit_test(centroidal-derivatives)

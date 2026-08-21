@@ -373,7 +373,7 @@ if(BUILD_PYTHON_INTERFACE)
     # --- INSTALL DERIVATIVE SCRIPTS
     install_python_files(
       MODULE derivative
-      FILES xm.py dcrba.py lambdas.py rnea_kinematic.py
+      FILES xm.py dcrba.py lambdas.py rnea_kinematic.py frame_kinematic.py contact_kinematic.py
     )
 
     # --- INSTALL VISUALIZATION SCRIPTS

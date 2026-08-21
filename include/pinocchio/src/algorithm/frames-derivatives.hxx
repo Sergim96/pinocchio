@@ -13,6 +13,366 @@
 
 namespace pinocchio
 {
+  namespace impl
+  {
+    template<
+      typename Scalar,
+      int Options,
+      template<typename, int> class JointCollectionTpl,
+      typename PlacementJacobianType,
+      typename JacobianDerivativeType>
+    struct ComputeFramePlacementDerivativesForwardStep
+    : public fusion::JointUnaryVisitorBase<ComputeFramePlacementDerivativesForwardStep<
+        Scalar,
+        Options,
+        JointCollectionTpl,
+        PlacementJacobianType,
+        JacobianDerivativeType>>
+    {
+      typedef ModelTpl<Scalar, Options, JointCollectionTpl> Model;
+      typedef DataTpl<Scalar, Options, JointCollectionTpl> Data;
+      typedef FramePlacementDerivativesWorkspaceTpl<Scalar, Options> Workspace;
+
+      typedef boost::fusion::vector<
+        const Model &,
+        Data &,
+        const PlacementJacobianType &,
+        Workspace &,
+        JacobianDerivativeType &>
+        ArgsType;
+
+      template<typename JointModel>
+      static void algo(
+        const JointModelBase<JointModel> & jmodel,
+        JointDataBase<typename JointModel::JointDataDerived> & jdata,
+        const Model & model,
+        Data & data,
+        const Eigen::MatrixBase<PlacementJacobianType> & joint_placement_jacobians,
+        Workspace & workspace,
+        const Eigen::MatrixBase<JacobianDerivativeType> & frame_jacobian_partial_dp)
+      {
+        typedef typename Model::JointIndex JointIndex;
+        typedef typename Data::Motion Motion;
+        typedef typename Data::SE3 SE3;
+
+        const JointIndex i = jmodel.id();
+        const JointIndex parent = model.parents[i];
+        const Eigen::Index number_parameters = joint_placement_jacobians.cols();
+        const Eigen::Index current_set = workspace.current_set;
+        const Eigen::Index next_set = 1 - current_set;
+
+        auto relative_placement_derivatives =
+          workspace.relativePlacementDerivative(number_parameters);
+        auto placement_derivatives = workspace.placementDerivative(current_set, number_parameters);
+        auto next_placement_derivatives =
+          workspace.placementDerivative(next_set, number_parameters);
+        auto velocity_derivatives = workspace.velocityDerivative(current_set, number_parameters);
+        auto next_velocity_derivatives = workspace.velocityDerivative(next_set, number_parameters);
+        auto acceleration_derivatives =
+          workspace.accelerationDerivative(current_set, number_parameters);
+        auto next_acceleration_derivatives =
+          workspace.accelerationDerivative(next_set, number_parameters);
+
+        const Eigen::Index joint_row =
+          joint_placement_jacobians.rows() == 6 * (Eigen::Index)model.njoints
+            ? 6 * (Eigen::Index)i
+            : 6 * ((Eigen::Index)i - 1);
+        const auto placement_jacobian =
+          joint_placement_jacobians.derived().middleRows(joint_row, 6);
+        const SE3 joint_motion_placement(jdata.M());
+        motionSet::se3ActionInverse(
+          joint_motion_placement, placement_jacobian, relative_placement_derivatives);
+
+        motionSet::se3ActionInverse(
+          data.liMi[i], placement_derivatives, next_placement_derivatives);
+        next_placement_derivatives += relative_placement_derivatives;
+
+        motionSet::se3ActionInverse(data.liMi[i], velocity_derivatives, next_velocity_derivatives);
+        const Motion parent_velocity(data.liMi[i].actInv(data.v[parent]));
+        motionSet::motionAction<ADDTO>(
+          parent_velocity, relative_placement_derivatives, next_velocity_derivatives);
+
+        motionSet::se3ActionInverse(
+          data.liMi[i], acceleration_derivatives, next_acceleration_derivatives);
+        const Motion parent_acceleration(data.liMi[i].actInv(data.a[parent]));
+        motionSet::motionAction<ADDTO>(
+          parent_acceleration, relative_placement_derivatives, next_acceleration_derivatives);
+        const Motion joint_velocity(jdata.v());
+        motionSet::motionAction<RMTO>(
+          joint_velocity, next_velocity_derivatives, next_acceleration_derivatives);
+
+        auto parent_jacobian = workspace.jacobian(current_set);
+        auto current_jacobian = workspace.jacobian(next_set);
+        motionSet::se3ActionInverse(data.liMi[i], parent_jacobian, current_jacobian);
+
+        JacobianDerivativeType & frame_jacobian_partial_dp_ =
+          PINOCCHIO_EIGEN_CONST_CAST(JacobianDerivativeType, frame_jacobian_partial_dp);
+        for (Eigen::Index parameter_id = 0; parameter_id < number_parameters; ++parameter_id)
+        {
+          auto jacobian_derivative =
+            frame_jacobian_partial_dp_.middleCols(parameter_id * (Eigen::Index)model.nv, model.nv);
+          for (Eigen::Index velocity_id = 0; velocity_id < model.nv; ++velocity_id)
+          {
+            const Motion derivative(jacobian_derivative.col(velocity_id));
+            jacobian_derivative.col(velocity_id) = data.liMi[i].actInv(derivative).toVector();
+          }
+          const Motion relative_placement_derivative(
+            relative_placement_derivatives.col(parameter_id));
+          motionSet::motionAction<RMTO>(
+            relative_placement_derivative, current_jacobian, jacobian_derivative);
+        }
+        jmodel.jointCols(current_jacobian) += jdata.S().matrix();
+
+        workspace.current_set = next_set;
+      }
+    };
+
+    template<
+      typename Scalar,
+      int Options,
+      template<typename, int> class JointCollectionTpl,
+      typename PlacementJacobianType,
+      typename PlacementDerivativeType,
+      typename JacobianDerivativeType,
+      typename AccelerationDerivativeType,
+      typename ClassicalAccelerationDerivativeType>
+    void computeFramePlacementDerivativesPrepared(
+      const ModelTpl<Scalar, Options, JointCollectionTpl> & model,
+      DataTpl<Scalar, Options, JointCollectionTpl> & data,
+      const JointIndex joint_id,
+      const SE3Tpl<Scalar, Options> & placement,
+      const SE3Tpl<Scalar, Options> & oMframe,
+      const Eigen::MatrixBase<PlacementJacobianType> & joint_placement_jacobians,
+      const ReferenceFrame reference_frame,
+      FramePlacementDerivativesWorkspaceTpl<Scalar, Options> & workspace,
+      const Eigen::MatrixBase<PlacementDerivativeType> & frame_placement_partial_dp,
+      const Eigen::MatrixBase<JacobianDerivativeType> & frame_jacobian_partial_dp,
+      const Eigen::MatrixBase<AccelerationDerivativeType> & frame_acceleration_partial_dp,
+      const Eigen::MatrixBase<ClassicalAccelerationDerivativeType> &
+        frame_classical_acceleration_partial_dp)
+    {
+      typedef ModelTpl<Scalar, Options, JointCollectionTpl> Model;
+      typedef DataTpl<Scalar, Options, JointCollectionTpl> Data;
+      typedef typename Model::JointIndex JointIndex;
+      typedef typename Data::Motion Motion;
+      typedef typename Data::SE3 SE3;
+      typedef typename Data::Vector3 Vector3;
+
+      PINOCCHIO_CHECK_INPUT_ARGUMENT(
+        joint_id < (JointIndex)model.njoints, "The joint_id is not valid.");
+      PINOCCHIO_CHECK_INPUT_ARGUMENT(
+        reference_frame == LOCAL || reference_frame == LOCAL_WORLD_ALIGNED
+          || reference_frame == WORLD,
+        "The reference frame is not valid.");
+      PINOCCHIO_CHECK_INPUT_ARGUMENT(
+        joint_placement_jacobians.rows() == 6 * model.njoints
+          || joint_placement_jacobians.rows() == 6 * (model.njoints - 1),
+        "The placement Jacobian must have 6 * model.njoints or 6 * (model.njoints - 1) rows");
+
+      const Eigen::Index number_parameters = joint_placement_jacobians.cols();
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(frame_placement_partial_dp.rows(), 6);
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(frame_placement_partial_dp.cols(), number_parameters);
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(frame_jacobian_partial_dp.rows(), 6);
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(frame_jacobian_partial_dp.cols(), model.nv * number_parameters);
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(frame_acceleration_partial_dp.rows(), 6);
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(frame_acceleration_partial_dp.cols(), number_parameters);
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(frame_classical_acceleration_partial_dp.rows(), 6);
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(
+        frame_classical_acceleration_partial_dp.cols(), number_parameters);
+      PINOCCHIO_CHECK_INPUT_ARGUMENT(
+        workspace.isCompatible(model.nv, number_parameters),
+        "The frame placement-derivative workspace is not compatible with model.nv or the parameter "
+        "count");
+      assert(model.check(data) && "data is not consistent with model.");
+
+      JacobianDerivativeType & frame_jacobian_partial_dp_ =
+        PINOCCHIO_EIGEN_CONST_CAST(JacobianDerivativeType, frame_jacobian_partial_dp);
+      PlacementDerivativeType & frame_placement_partial_dp_ =
+        PINOCCHIO_EIGEN_CONST_CAST(PlacementDerivativeType, frame_placement_partial_dp);
+      AccelerationDerivativeType & frame_acceleration_partial_dp_ =
+        PINOCCHIO_EIGEN_CONST_CAST(AccelerationDerivativeType, frame_acceleration_partial_dp);
+      ClassicalAccelerationDerivativeType & frame_classical_acceleration_partial_dp_ =
+        PINOCCHIO_EIGEN_CONST_CAST(
+          ClassicalAccelerationDerivativeType, frame_classical_acceleration_partial_dp);
+
+      frame_jacobian_partial_dp_.setZero();
+      workspace.current_set = 0;
+      workspace.placementDerivative(0, number_parameters).setZero();
+      workspace.velocityDerivative(0, number_parameters).setZero();
+      workspace.accelerationDerivative(0, number_parameters).setZero();
+      workspace.jacobian(0).setZero();
+
+      typedef ComputeFramePlacementDerivativesForwardStep<
+        Scalar, Options, JointCollectionTpl, PlacementJacobianType, JacobianDerivativeType>
+        Pass;
+      typename Pass::ArgsType args(
+        model, data, joint_placement_jacobians.derived(), workspace, frame_jacobian_partial_dp_);
+      const typename Model::IndexVector & support = model.supports[joint_id];
+      for (std::size_t support_id = 1; support_id < support.size(); ++support_id)
+      {
+        const JointIndex joint_id = support[support_id];
+        Pass::run(model.joints[joint_id], data.joints[joint_id], args);
+      }
+
+      const Eigen::Index current_set = workspace.current_set;
+      const Eigen::Index next_set = 1 - current_set;
+      auto placement_derivatives = workspace.placementDerivative(current_set, number_parameters);
+      auto frame_placement_derivatives = workspace.placementDerivative(next_set, number_parameters);
+      auto velocity_derivatives = workspace.velocityDerivative(current_set, number_parameters);
+      auto frame_velocity_derivatives = workspace.velocityDerivative(next_set, number_parameters);
+      auto acceleration_derivatives =
+        workspace.accelerationDerivative(current_set, number_parameters);
+      auto frame_acceleration_derivatives =
+        workspace.accelerationDerivative(next_set, number_parameters);
+
+      motionSet::se3ActionInverse(placement, placement_derivatives, frame_placement_derivatives);
+      frame_placement_partial_dp_ = frame_placement_derivatives;
+      motionSet::se3ActionInverse(placement, velocity_derivatives, frame_velocity_derivatives);
+      motionSet::se3ActionInverse(
+        placement, acceleration_derivatives, frame_acceleration_derivatives);
+
+      auto parent_jacobian = workspace.jacobian(current_set);
+      auto frame_jacobian = workspace.jacobian(next_set);
+      motionSet::se3ActionInverse(placement, parent_jacobian, frame_jacobian);
+      for (Eigen::Index parameter_id = 0; parameter_id < number_parameters; ++parameter_id)
+      {
+        auto jacobian_derivative =
+          frame_jacobian_partial_dp_.middleCols(parameter_id * (Eigen::Index)model.nv, model.nv);
+        for (Eigen::Index velocity_id = 0; velocity_id < model.nv; ++velocity_id)
+        {
+          const Motion derivative(jacobian_derivative.col(velocity_id));
+          jacobian_derivative.col(velocity_id) = placement.actInv(derivative).toVector();
+        }
+      }
+
+      Motion frame_velocity = pinocchio::getFrameVelocity(model, data, joint_id, placement, LOCAL);
+      const Motion frame_acceleration =
+        pinocchio::getFrameAcceleration(model, data, joint_id, placement, LOCAL);
+
+      if (reference_frame != LOCAL)
+      {
+        const SE3 output_placement =
+          reference_frame == WORLD ? oMframe : SE3(oMframe.rotation(), Vector3::Zero());
+
+        for (Eigen::Index parameter_id = 0; parameter_id < number_parameters; ++parameter_id)
+        {
+          Motion frame_tangent(frame_placement_derivatives.col(parameter_id));
+          if (reference_frame == LOCAL_WORLD_ALIGNED)
+            frame_tangent.linear().setZero();
+
+          auto jacobian_derivative =
+            frame_jacobian_partial_dp_.middleCols(parameter_id * (Eigen::Index)model.nv, model.nv);
+          motionSet::motionAction<ADDTO>(frame_tangent, frame_jacobian, jacobian_derivative);
+          for (Eigen::Index velocity_id = 0; velocity_id < model.nv; ++velocity_id)
+          {
+            const Motion derivative(jacobian_derivative.col(velocity_id));
+            jacobian_derivative.col(velocity_id) = output_placement.act(derivative).toVector();
+          }
+
+          Motion velocity_derivative(frame_velocity_derivatives.col(parameter_id));
+          velocity_derivative += frame_tangent.cross(frame_velocity);
+          frame_velocity_derivatives.col(parameter_id) =
+            output_placement.act(velocity_derivative).toVector();
+
+          Motion acceleration_derivative(frame_acceleration_derivatives.col(parameter_id));
+          acceleration_derivative += frame_tangent.cross(frame_acceleration);
+          frame_acceleration_derivatives.col(parameter_id) =
+            output_placement.act(acceleration_derivative).toVector();
+        }
+        frame_velocity = output_placement.act(frame_velocity);
+      }
+
+      frame_acceleration_partial_dp_ = frame_acceleration_derivatives;
+      frame_classical_acceleration_partial_dp_ = frame_acceleration_derivatives;
+      for (Eigen::Index parameter_id = 0; parameter_id < number_parameters; ++parameter_id)
+      {
+        const Motion velocity_derivative(frame_velocity_derivatives.col(parameter_id));
+        frame_classical_acceleration_partial_dp_.template topRows<3>().col(parameter_id) +=
+          velocity_derivative.angular().cross(frame_velocity.linear())
+          + frame_velocity.angular().cross(velocity_derivative.linear());
+      }
+    }
+
+    template<
+      typename Scalar,
+      int Options,
+      template<typename, int> class JointCollectionTpl,
+      typename ConfigVectorType,
+      typename TangentVectorType,
+      typename PlacementJacobianType,
+      typename PlacementDerivativeType,
+      typename JacobianDerivativeType,
+      typename AccelerationDerivativeType,
+      typename ClassicalAccelerationDerivativeType>
+    void computeFramePlacementDerivatives(
+      const ModelTpl<Scalar, Options, JointCollectionTpl> & model,
+      DataTpl<Scalar, Options, JointCollectionTpl> & data,
+      const Eigen::MatrixBase<ConfigVectorType> & q,
+      const Eigen::MatrixBase<TangentVectorType> & v,
+      const FrameIndex frame_id,
+      const Eigen::MatrixBase<PlacementJacobianType> & joint_placement_jacobians,
+      const ReferenceFrame reference_frame,
+      FramePlacementDerivativesWorkspaceTpl<Scalar, Options> & workspace,
+      const Eigen::MatrixBase<PlacementDerivativeType> & frame_placement_partial_dp,
+      const Eigen::MatrixBase<JacobianDerivativeType> & frame_jacobian_partial_dp,
+      const Eigen::MatrixBase<AccelerationDerivativeType> & frame_acceleration_partial_dp,
+      const Eigen::MatrixBase<ClassicalAccelerationDerivativeType> &
+        frame_classical_acceleration_partial_dp)
+    {
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(
+        q.size(), model.nq, "The joint configuration vector is not of right size");
+      PINOCCHIO_CHECK_ARGUMENT_SIZE(
+        v.size(), model.nv, "The joint velocity vector is not of right size");
+      PINOCCHIO_CHECK_INPUT_ARGUMENT(
+        frame_id < (FrameIndex)model.nframes, "The frame_id is not valid.");
+
+      pinocchio::forwardKinematics(model, data, q, v, workspace.zero_acceleration);
+      pinocchio::computeJointJacobians(model, data);
+      pinocchio::updateFramePlacement(model, data, frame_id);
+
+      const typename ModelTpl<Scalar, Options, JointCollectionTpl>::Frame & frame =
+        model.frames[frame_id];
+      computeFramePlacementDerivativesPrepared(
+        model, data, frame.parentJoint, frame.placement, data.oMf[frame_id],
+        joint_placement_jacobians, reference_frame, workspace, frame_placement_partial_dp,
+        frame_jacobian_partial_dp, frame_acceleration_partial_dp,
+        frame_classical_acceleration_partial_dp);
+    }
+  } // namespace impl
+
+  template<
+    typename Scalar,
+    int Options,
+    template<typename, int> class JointCollectionTpl,
+    typename ConfigVectorType,
+    typename TangentVectorType,
+    typename PlacementJacobianType,
+    typename PlacementDerivativeType,
+    typename JacobianDerivativeType,
+    typename AccelerationDerivativeType,
+    typename ClassicalAccelerationDerivativeType>
+  void computeFramePlacementDerivatives(
+    const ModelTpl<Scalar, Options, JointCollectionTpl> & model,
+    DataTpl<Scalar, Options, JointCollectionTpl> & data,
+    const Eigen::MatrixBase<ConfigVectorType> & q,
+    const Eigen::MatrixBase<TangentVectorType> & v,
+    const FrameIndex frame_id,
+    const Eigen::MatrixBase<PlacementJacobianType> & joint_placement_jacobians,
+    const ReferenceFrame reference_frame,
+    FramePlacementDerivativesWorkspaceTpl<Scalar, Options> & workspace,
+    const Eigen::MatrixBase<PlacementDerivativeType> & frame_placement_partial_dp,
+    const Eigen::MatrixBase<JacobianDerivativeType> & frame_jacobian_partial_dp,
+    const Eigen::MatrixBase<AccelerationDerivativeType> & frame_acceleration_partial_dp,
+    const Eigen::MatrixBase<ClassicalAccelerationDerivativeType> &
+      frame_classical_acceleration_partial_dp)
+  {
+    impl::computeFramePlacementDerivatives(
+      model, data, make_const_ref(q), make_const_ref(v), frame_id,
+      make_const_ref(joint_placement_jacobians), reference_frame, workspace,
+      make_ref(frame_placement_partial_dp), make_ref(frame_jacobian_partial_dp),
+      make_ref(frame_acceleration_partial_dp), make_ref(frame_classical_acceleration_partial_dp));
+  }
+
   template<
     typename Scalar,
     int Options,
@@ -180,6 +540,33 @@ namespace pinocchio
 
 namespace pinocchio
 {
+  namespace impl
+  {
+    extern template PINOCCHIO_EXPLICIT_INSTANTIATION_DECLARATION_DLLAPI void
+    computeFramePlacementDerivatives<
+      context::Scalar,
+      context::Options,
+      JointCollectionDefaultTpl,
+      Eigen::Ref<const context::VectorXs>,
+      Eigen::Ref<const context::VectorXs>,
+      Eigen::Ref<const context::MatrixXs>,
+      Eigen::Ref<context::MatrixXs>,
+      Eigen::Ref<context::MatrixXs>,
+      Eigen::Ref<context::MatrixXs>,
+      Eigen::Ref<context::MatrixXs>>(
+      const Model &,
+      Data &,
+      const Eigen::MatrixBase<Eigen::Ref<const context::VectorXs>> &,
+      const Eigen::MatrixBase<Eigen::Ref<const context::VectorXs>> &,
+      const FrameIndex,
+      const Eigen::MatrixBase<Eigen::Ref<const context::MatrixXs>> &,
+      const ReferenceFrame,
+      FramePlacementDerivativesWorkspaceTpl<context::Scalar, context::Options> &,
+      const Eigen::MatrixBase<Eigen::Ref<context::MatrixXs>> &,
+      const Eigen::MatrixBase<Eigen::Ref<context::MatrixXs>> &,
+      const Eigen::MatrixBase<Eigen::Ref<context::MatrixXs>> &,
+      const Eigen::MatrixBase<Eigen::Ref<context::MatrixXs>> &);
+  } // namespace impl
 
   extern template PINOCCHIO_EXPLICIT_INSTANTIATION_DECLARATION_DLLAPI void
   getFrameVelocityDerivatives<

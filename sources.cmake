@@ -28,6 +28,7 @@ set(${PROJECT_NAME}_CORE_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/pinocchio/algorithm/delassus.hpp
     ${PROJECT_SOURCE_DIR}/include/pinocchio/algorithm/diagonal-preconditioner.hpp
     ${PROJECT_SOURCE_DIR}/include/pinocchio/algorithm/energy.hpp
+    ${PROJECT_SOURCE_DIR}/include/pinocchio/algorithm/contact-kinematics-derivatives.hpp
     ${PROJECT_SOURCE_DIR}/include/pinocchio/algorithm/frames-derivatives.hpp
     ${PROJECT_SOURCE_DIR}/include/pinocchio/algorithm/frames.hpp
     ${PROJECT_SOURCE_DIR}/include/pinocchio/algorithm/fwd.hpp
@@ -349,6 +350,7 @@ set(${PROJECT_NAME}_CORE_PRIVATE_HEADERS
     ${PROJECT_SOURCE_DIR}/include/pinocchio/src/algorithm/impulse-dynamics-derivatives.hxx
     ${PROJECT_SOURCE_DIR}/include/pinocchio/src/algorithm/copy.hxx
     ${PROJECT_SOURCE_DIR}/include/pinocchio/src/algorithm/cholesky.hxx
+    ${PROJECT_SOURCE_DIR}/include/pinocchio/src/algorithm/contact-kinematics-derivatives.hxx
     ${PROJECT_SOURCE_DIR}/include/pinocchio/src/algorithm/frames-derivatives.hxx
     ${PROJECT_SOURCE_DIR}/include/pinocchio/src/multibody/joint/joint-spherical-ZYX.hxx
     ${PROJECT_SOURCE_DIR}/include/pinocchio/src/multibody/joint/joint-planar.hxx
@@ -784,6 +786,7 @@ set(${PROJECT_NAME}_TEMPLATE_INSTANTIATION_SOURCES
     ${PROJECT_SOURCE_DIR}/src/algorithm/aba.cpp
     ${PROJECT_SOURCE_DIR}/src/algorithm/regressor.cpp
     ${PROJECT_SOURCE_DIR}/src/algorithm/contact-dynamics.cpp
+    ${PROJECT_SOURCE_DIR}/src/algorithm/contact-kinematics-derivatives.cpp
     ${PROJECT_SOURCE_DIR}/src/algorithm/frames-derivatives.cpp
     ${PROJECT_SOURCE_DIR}/src/algorithm/impulse-dynamics.cpp
     ${PROJECT_SOURCE_DIR}/src/algorithm/model.cpp
