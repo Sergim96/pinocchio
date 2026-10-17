@@ -95,6 +95,20 @@ BOOST_AUTO_TEST_CASE(log)
   SE3::Vector3 omega = log3(M.rotation());
   BOOST_CHECK(omega.isZero());
 
+  // Tiny rotations exercise the small-angle path after the matrix is
+  // renormalized. Its trace may round just above 3 with FMA, so both the
+  // reported angle and the Jacobian must remain finite.
+  const SE3::Vector3 tiny_omega((SE3::Vector3() << 1e-8, -2e-8, 3e-9).finished());
+  const SE3::Matrix3 tiny_rotation = exp3(tiny_omega);
+  double tiny_theta;
+  const SE3::Vector3 tiny_log = log3(tiny_rotation, tiny_theta);
+  SE3::Matrix3 tiny_jlog;
+  Jlog3(tiny_rotation, tiny_jlog);
+  BOOST_CHECK(std::isfinite(tiny_theta));
+  BOOST_CHECK(tiny_log.allFinite());
+  BOOST_CHECK(tiny_jlog.allFinite());
+  BOOST_CHECK(tiny_log.isApprox(tiny_omega));
+
   // check the NAN case
 #ifdef NDEBUG
   SE3::Matrix3 mat3_nan(SE3::Matrix3::Constant(NAN));

@@ -84,7 +84,15 @@ namespace pinocchio
       const Matrix3 Rnormed = renormalize_rotation_matrix(R);
 
       const Scalar tr = Rnormed.trace();
-      const Scalar cos_value = (tr - Scalar(1)) / Scalar(2);
+      const Scalar cos_value_raw = (tr - Scalar(1)) / Scalar(2);
+      // Renormalization can leave the trace one ulp outside [-1, 3] because of
+      // rounding (in particular when FMA is enabled). Clamp the derived cosine
+      // before using it in acos or the small-angle expansion. The nested
+      // conditionals deliberately retain NaN inputs, as comparisons with NaN
+      // are false and the raw value is selected.
+      const Scalar cos_value = if_then_else(
+        GT, cos_value_raw, Scalar(1), Scalar(1),
+        if_then_else(LT, cos_value_raw, Scalar(-1), Scalar(-1), cos_value_raw));
 
       const Scalar prec = TaylorSeriesExpansion<Scalar>::template precision<2>();
       // Singular cases when theta == PI
